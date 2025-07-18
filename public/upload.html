@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Upload Excel File to Firebase</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      font-family: 'Roboto', sans-serif;
+      background-color: #FFFFFF;
+      margin: 0;
+      padding: 0;
+      color: #002352;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    .container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px 20px;
+    }
+
+    h2 {
+      color: #004990;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    input[type="file"] {
+      margin-bottom: 20px;
+    }
+
+    button {
+      background-color: #E21A23;
+      color: white;
+      border: none;
+      padding: 10px 30px;
+      font-size: 16px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #c30c15;
+    }
+
+    .footer {
+      width: 100%;
+      margin-top: auto;
+    }
+
+    .footer img {
+      width: 100%;
+      height: auto;
+      object-fit: cover;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Upload Excel File to Firebase</h2>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".xlsx, .xls" required />
+      <button type="submit">Upload</button>
+    </form>
+  </div>
+
+  <div class="footer">
+    <img src="1970 Footer.png" alt="Excellence Since 1970 Footer" />
+  </div>
+</body>
+</html>
