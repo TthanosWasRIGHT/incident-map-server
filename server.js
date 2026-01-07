@@ -16,29 +16,26 @@ const port = process.env.PORT || 3001;
 /* ============================
    ✅ Firebase Admin Init
 ============================ */
-if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-  throw new Error("Missing FIREBASE_SERVICE_ACCOUNT env var on Render.");
-}
-if (!process.env.FIREBASE_DATABASE_URL) {
-  throw new Error("Missing FIREBASE_DATABASE_URL env var on Render.");
-}
-
-let serviceAccount;
-try {
-  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-} catch (e) {
-  throw new Error(
-    "FIREBASE_SERVICE_ACCOUNT is not valid JSON. Paste the FULL JSON as the env var value."
-  );
+if (
+  !process.env.FIREBASE_PROJECT_ID ||
+  !process.env.FIREBASE_CLIENT_EMAIL ||
+  !process.env.FIREBASE_PRIVATE_KEY ||
+  !process.env.FIREBASE_DATABASE_URL
+) {
+  throw new Error("Missing Firebase Admin environment variables.");
 }
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  }),
   databaseURL: process.env.FIREBASE_DATABASE_URL,
 });
 
 const db = admin.database();
-const INCIDENTS_PATH = process.env.INCIDENTS_PATH || "incidents"; // e.g. "kenya/incidents" or "uganda/incidents"
+const INCIDENTS_PATH = process.env.INCIDENTS_PATH || "incidents";
 
 /* ============================
    📂 Ensure upload directory
