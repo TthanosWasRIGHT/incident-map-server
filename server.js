@@ -1,101 +1,150 @@
-require('dotenv').config();
-const express = require('express');
-const multer = require('multer');
-const xlsx = require('xlsx');
-const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
-const { initializeApp } = require('firebase/app');
-const { getDatabase, ref, push } = require('firebase/database');
+require("dotenv").config();
+const express = require("express");
+const multer = require("multer");
+const xlsx = require("xlsx");
+const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
+const admin = require("firebase-admin");
 
 const app = express();
 app.use(cors());
-app.use(express.static('public'));
+app.use(express.static("public"));
 
 const port = process.env.PORT || 3001;
 
 /* ============================
-   Firebase (Kenya)
+   ✅ Firebase Admin Init
 ============================ */
-const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  databaseURL: process.env.FIREBASE_DATABASE_URL,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.FIREBASE_APP_ID,
-};
-
-const appFB = initializeApp(firebaseConfig);
-const db = getDatabase(appFB);
-
-/* ============================
-   Ensure upload directory
-============================ */
-const UPLOAD_DIR = path.join(__dirname, 'upload');
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR);
+if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+  throw new Error("Missing FIREBASE_SERVICE_ACCOUNT env var on Render.");
+}
+if (!process.env.FIREBASE_DATABASE_URL) {
+  throw new Error("Missing FIREBASE_DATABASE_URL env var on Render.");
 }
 
+let serviceAccount;
+try {
+  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} catch (e) {
+  throw new Error(
+    "FIREBASE_SERVICE_ACCOUNT is not valid JSON. Paste the FULL JSON as the env var value."
+  );
+}
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: process.env.FIREBASE_DATABASE_URL,
+});
+
+const db = admin.database();
+const INCIDENTS_PATH = process.env.INCIDENTS_PATH || "incidents"; // e.g. "kenya/incidents" or "uganda/incidents"
+
 /* ============================
-   Multer config
+   📂 Ensure upload directory
+============================ */
+const UPLOAD_DIR = path.join(__dirname, "upload");
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+/* ============================
+   📤 Multer config
 ============================ */
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, UPLOAD_DIR),
   filename: (_, file, cb) => cb(null, file.originalname),
 });
-
 const upload = multer({ storage });
 
 /* ============================
-   Upload endpoint (KENYA)
+   Helpers
 ============================ */
-app.post('/upload', upload.single('file'), (req, res) => {
+function excelDateToISO(excelSerial) {
+  // Excel serial date to YYYY-MM-DD
+  const d = new Date(Math.round((excelSerial - 25569) * 86400 * 1000));
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().split("T")[0];
+}
+
+function cleanNumber(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/* ============================
+   🚀 Upload endpoint
+============================ */
+app.post("/upload", upload.single("file"), async (req, res) => {
   try {
+    if (!req.file?.path) return res.status(400).send("No file uploaded.");
+
     const workbook = xlsx.readFile(req.file.path);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = xlsx.utils.sheet_to_json(sheet);
 
     let written = 0;
+    const updates = [];
 
-    rows.forEach(row => {
-      const lat = parseFloat(row['LATITUDE']);
-      const lon = parseFloat(row['LONGITUDE']);
-      if (isNaN(lat) || isNaN(lon)) return;
+    rows.forEach((row, idx) => {
+      const lat = cleanNumber(row["LATITUDE"]);
+      const lon = cleanNumber(row["LONGITUDE"]);
+      if (lat === null || lon === null) return;
 
-      push(ref(db, 'incidents/kenya'), {
-        county: row['COUNTY'] || 'N/A',
-        title: row['INCIDENT CATEGORY'] || 'N/A',
-        description: row['INCIDENT DESCRIPTION'] || '',
-        actor: row['ACTORS'] || '',
-        time: `${row['INCIDENT DATE']} ${row['INCIDENT TIME'] || ''}`,
+      const incidentDate = row["INCIDENT DATE"];
+      const incidentTime = row["INCIDENT TIME"] || "";
+
+      let formattedDate = null;
+      if (typeof incidentDate === "number") formattedDate = excelDateToISO(incidentDate);
+      if (!formattedDate && typeof incidentDate === "string") formattedDate = incidentDate;
+
+      const payload = {
+        // ✅ Keep district, but also store county for backwards compatibility if needed
+        district: row["DISTRICT"] || row["district"] || row["County"] || row["COUNTY"] || "N/A",
+        county: row["COUNTY"] || row["county"] || null,
+
+        title: row["INCIDENT CATEGORY"] || row["title"] || "N/A",
+        description: row["INCIDENT DESCRIPTION"] || row["description"] || "",
+        actor: row["ACTORS"] || row["actor"] || "",
+
+        time: `${formattedDate || "Unknown"} ${incidentTime}`.trim(),
         lat,
         lon,
         weight: 1,
-      });
+      };
 
+      // Batch-like push (we’ll await all pushes)
+      updates.push(db.ref(INCIDENTS_PATH).push(payload));
       written++;
     });
 
+    await Promise.all(updates);
+
     res.send(`
-      <h1>Upload Complete</h1>
-      <p>${written} Kenya incidents saved.</p>
-      <a href="/upload.html">Upload another file</a>
+      <!DOCTYPE html>
+      <html>
+        <head><title>Upload Success</title></head>
+        <body style="font-family: Arial; text-align:center; padding:40px;">
+          <h1>Upload Complete</h1>
+          <p>${written} incidents saved to <b>${INCIDENTS_PATH}</b>.</p>
+          <a href="/upload.html">Upload another file</a>
+        </body>
+      </html>
     `);
   } catch (err) {
-    console.error(err);
-    res.status(500).send('Upload failed');
+    console.error("❌ Upload failed:", err);
+    res.status(500).send("Internal Server Error. Check Render logs.");
   }
 });
 
 /* ============================
-   Upload form
+   🧾 Upload form
 ============================ */
-app.get('/upload', (_, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'upload.html'));
+app.get("/upload", (_, res) => {
+  res.sendFile(path.join(__dirname, "public", "upload.html"));
 });
 
-app.listen(port, () =>
-  console.log(`✅ Kenya server running on port ${port}`)
-);
+/* ============================
+   Health check
+============================ */
+app.get("/", (_, res) => res.send("OK"));
+
+app.listen(port, () => console.log(`✅ Server running on port ${port}`));
